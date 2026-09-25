@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Reading Practice</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><rect width='16' height='16' fill='%23111'/><text x='8' y='12.5' font-size='12' text-anchor='middle' fill='%23fff' font-family='Georgia'>R</text></svg>">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="app">
+  <div class="bar">
+    <div class="filters">
+      <select id="test" aria-label="Test"></select>
+      <select id="type" aria-label="Question type"></select>
+      <label><input type="checkbox" id="verbalOnly"> verbal only</label>
+      <label><input type="checkbox" id="redo"> include done</label>
+      <label><input type="checkbox" id="wrongOnly"> wrong only</label>
+    </div>
+    <div class="progress" id="progress"></div>
+  </div>
+  <main class="split" id="main">
+    <section class="left" id="left"></section>
+    <section class="right" id="right"><p class="muted">Loading questions…</p></section>
+  </main>
+  <footer class="foot">
+    <span class="muted">Keys: A–E choose · Enter next</span>
+    <button type="button" id="reset" class="link">reset progress</button>
+  </footer>
+</div>
+<script src="app.js"></script>
+</body>
+</html>

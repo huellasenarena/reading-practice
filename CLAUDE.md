@@ -16,6 +16,7 @@ The `gh` CLI's local config still labels the account `JNS99` (the old username);
   - Answering only says **Yes.** / **No.** and never reveals the answer on its own. A wrong pick gets ✗ and the user can try again. Only the first try is recorded in progress. With no answer key, the answer is recorded as "unchecked".
   - After a try, a **Show explanation** / **Show answer** button reveals the answer, any `note` and the explanation. The Previous / Next / Show row sits right under the choices, and the explanation opens below it to keep mouse travel short. The owner asked for this.
   - **Previous** goes back through questions seen this visit (the `trail` in app.js), keeping each one's state. Keys: A–E to choose, → or Enter for next, ← for previous.
+  - **flag** link on each question (with an optional note) for answers or text the owner thinks are wrong. Flags are stored in localStorage `rp-flags-v1`. The footer's **export flags (N)** downloads `flags.json` (id, test, source, note, question excerpt, stored answer). To review, ask the owner for that file, check each flagged question against its source, and fix it in the extraction scripts rather than hand-editing `data/`.
   - Typed answers (CAT para jumble and odd sentence) use a text box. Comparison ignores case, spaces and punctuation.
   - Progress is saved in localStorage (`rp-progress-v1`, prefs in `rp-prefs-v1`), per device.
   - `#<question-id>` in the URL opens a specific question.
@@ -84,3 +85,5 @@ Originals are not committed: `sources/` is git-ignored, and the PDFs live in `~/
 - 16 randomly sampled keys were checked by solving the questions; all were correct.
 - Question types for non-SAT tests come from regexes on the stem wording, so a few may be misfiled.
 - The Puerto Rico OCR occasionally drops an accent.
+- Possible next step, not yet done: a stratified answer-key check of about 150 questions (2–3 from every paper, start/middle/end), emphasising TSA, TAGE MAGE, LSAT Puerto Rico and CAT, whose keys are separate from the questions. Report mismatches before changing any data.
+- Progress is per device only. If the owner wants syncing, the suggestion was a private GitHub Gist (or an export/import button).

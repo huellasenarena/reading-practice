@@ -4,11 +4,13 @@
 const LETTERS = "ABCDEFGH";
 const STORE = "rp-progress-v1";
 const PREFS = "rp-prefs-v1";
+const FLAGS = "rp-flags-v1";
 const $ = (id) => document.getElementById(id);
 
 let all = [];           // every question
 let current = null;     // question on screen
 let progress = load(STORE, {});   // id -> {r: "c" | "w" | "u", a: answer given, t: time}
+let flags = load(FLAGS, {});      // id -> {t: time, note: text}: questions the owner thinks are wrong
 let prefs = load(PREFS, { test: "", type: "", verbalOnly: false, redo: false, wrongOnly: false });
 
 function load(key, fallback) {
@@ -47,6 +49,8 @@ async function init() {
   $("test").addEventListener("change", () => { prefs.test = $("test").value; prefs.type = ""; save(PREFS, prefs); buildTypeSelect(); refresh(true); });
   $("type").addEventListener("change", () => { prefs.type = $("type").value; save(PREFS, prefs); refresh(true); });
   $("reset").addEventListener("click", resetProgress);
+  $("exportFlags").addEventListener("click", exportFlags);
+  renderFlagCount();
   document.addEventListener("keydown", onKey);
   window.addEventListener("hashchange", () => showById(location.hash.slice(1)));
   buildTypeSelect();
@@ -188,7 +192,9 @@ function show(entry) {
   html += `<p class="result" id="result"></p>`;
   html += `<div class="nav"><button type="button" id="prev" ${pos > 0 ? "" : "disabled"}>Previous</button>` +
     `<button type="button" id="next">Next</button>` +
-    (hasKey ? `<button type="button" id="reveal" hidden>${q.explanation ? "Show explanation" : "Show answer"}</button>` : "") + `</div>`;
+    (hasKey ? `<button type="button" id="reveal" hidden>${q.explanation ? "Show explanation" : "Show answer"}</button>` : "") +
+    `<button type="button" id="flag" class="link flag"></button></div>`;
+  html += `<div id="flagNote" hidden><input type="text" id="flagText" placeholder="What looks wrong? (optional)" aria-label="Flag note"></div>`;
   html += `<div id="more"></div>`;
   $("right").innerHTML = html;
   window.scrollTo(0, 0);
@@ -198,8 +204,49 @@ function show(entry) {
   if (form) form.addEventListener("submit", (e) => { e.preventDefault(); answer($("titaInput").value); });
   $("prev").addEventListener("click", previous);
   $("next").addEventListener("click", next);
+  $("flag").addEventListener("click", () => toggleFlag(q));
+  $("flagText").addEventListener("input", () => {
+    if (flags[q.id]) { flags[q.id].note = $("flagText").value; save(FLAGS, flags); }
+  });
+  paintFlag(q);
   if ($("reveal")) $("reveal").addEventListener("click", () => { entry.shown = true; paint(entry); $("next").focus({ preventScroll: true }); });
   paint(entry);
+}
+
+function toggleFlag(q) {
+  if (flags[q.id]) delete flags[q.id];
+  else flags[q.id] = { t: Date.now(), note: "" };
+  save(FLAGS, flags);
+  paintFlag(q);
+  if (flags[q.id]) $("flagText").focus();
+}
+
+function paintFlag(q) {
+  const f = flags[q.id];
+  $("flag").textContent = f ? "flagged (undo)" : "flag";
+  $("flag").title = "Mark this question if the answer or text looks wrong";
+  $("flagNote").hidden = !f;
+  $("flagText").value = f ? f.note : "";
+  renderFlagCount();
+}
+
+function renderFlagCount() {
+  const n = Object.keys(flags).length;
+  $("exportFlags").hidden = !n;
+  $("exportFlags").textContent = `export flags (${n})`;
+}
+
+function exportFlags() {
+  const byId = new Map(all.map((q) => [q.id, q]));
+  const rows = Object.entries(flags).map(([id, f]) => {
+    const q = byId.get(id) || {};
+    return { id, test: q.test, source: q.source, note: f.note, flagged: new Date(f.t).toISOString(),
+             question: (q.question || "").slice(0, 200), answer: q.answer };
+  });
+  const url = URL.createObjectURL(new Blob([JSON.stringify(rows, null, 2)], { type: "application/json" }));
+  const a = Object.assign(document.createElement("a"), { href: url, download: "flags.json" });
+  document.body.append(a); a.click(); a.remove();
+  URL.revokeObjectURL(url);
 }
 
 function norm(s) {

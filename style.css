@@ -57,6 +57,9 @@ button.link { border: none; padding: 0; background: none; color: var(--muted); t
 .nav { display: flex; gap: 8px; flex-wrap: wrap; }
 .nav button:disabled { color: var(--muted); cursor: default; }
 .result:empty { display: none; }
+.nav .flag { margin-left: auto; font-size: 12px; align-self: center; }
+#flagNote input { width: 100%; font-size: 13px; }
+.footlinks { display: flex; gap: 16px; }
 
 .foot { display: flex; justify-content: space-between; gap: 12px; padding: 8px 16px; border-top: 1px solid var(--line); font-size: 12px; }
 u { text-decoration-thickness: 1px; text-underline-offset: 2px; }

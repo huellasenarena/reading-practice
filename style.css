@@ -50,11 +50,13 @@ button.link { border: none; padding: 0; background: none; color: var(--muted); t
 .tita { display: flex; gap: 8px; }
 .tita input { width: 12ch; }
 
-.result { font-weight: 600; }
+.result { font-weight: 600; margin: 0; }
 .note { font-size: 13px; color: var(--muted); border-left: 2px solid var(--line); padding-left: 8px; }
 .explanation { border-top: 1px solid var(--line); padding-top: 12px; font-size: 14px; }
 .explanation p { margin: 0 0 0.7em; }
-.nav { display: flex; gap: 8px; }
+.nav { display: flex; gap: 8px; flex-wrap: wrap; }
+.nav button:disabled { color: var(--muted); cursor: default; }
+.result:empty { display: none; }
 
 .foot { display: flex; justify-content: space-between; gap: 12px; padding: 8px 16px; border-top: 1px solid var(--line); font-size: 12px; }
 u { text-decoration-thickness: 1px; text-underline-offset: 2px; }

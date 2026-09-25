@@ -120,32 +120,51 @@ function renderProgress() {
   $("progress").textContent = `${qs.length} questions · ${done} done · ${c} correct · ${w} incorrect · ${u} unchecked`;
 }
 
+// Questions seen this visit, so Previous can go back. Each entry keeps its state:
+// tries = letters/answers tried, done = answered correctly, shown = answer revealed.
+const trail = [];
+let pos = -1;
+
 function next() {
+  if (pos < trail.length - 1) { pos++; show(trail[pos]); return; }
   const list = candidates().filter((q) => !current || q.id !== current.id || candidates().length === 1);
   if (!list.length) {
     current = null;
     history.replaceState(null, "", location.pathname);
     $("main").className = "split single";
     $("left").innerHTML = "";
-    $("right").innerHTML = prefs.wrongOnly
+    $("right").innerHTML = (prefs.wrongOnly
       ? `<p>No incorrect questions left for this filter.</p>`
-      : `<p>You have done every question for this filter.</p><p class="muted">Tick “include done” to see them again.</p>`;
+      : `<p>You have done every question for this filter.</p><p class="muted">Tick “include done” to see them again.</p>`) +
+      (pos > 0 ? `<div class="nav"><button type="button" id="prev">Previous</button></div>` : "");
+    if ($("prev")) $("prev").addEventListener("click", previous);
     return;
   }
-  show(list[Math.floor(Math.random() * list.length)]);
+  visit(list[Math.floor(Math.random() * list.length)]);
+}
+
+function previous() {
+  if (pos > 0) { pos--; show(trail[pos]); }
+}
+
+function visit(q) {
+  trail.splice(pos + 1);
+  trail.push({ q, tries: [], done: false, shown: false });
+  pos = trail.length - 1;
+  show(trail[pos]);
 }
 
 function showById(id) {
   const q = id && all.find((x) => x.id === id);
-  if (q) show(q, true);
+  if (q && (!current || current.id !== q.id)) visit(q);
   return !!q;
 }
 
 // ---- rendering one question
-function show(q, fromHash) {
+function show(entry) {
+  const q = entry.q;
   current = q;
-  delete $("right").dataset.answered;
-  if (!fromHash) history.replaceState(null, "", "#" + q.id);
+  history.replaceState(null, "", "#" + q.id);
   const images = q.image ? [].concat(q.image) : [];
   const hasLeft = !!q.passage || images.length > 0;
   $("main").className = hasLeft ? "split" : "split single";
@@ -165,62 +184,84 @@ function show(q, fromHash) {
   } else {
     html += `<form class="tita" id="tita"><input type="text" id="titaInput" autocomplete="off" aria-label="Your answer" placeholder="answer"><button type="submit">Check</button></form>`;
   }
-  html += `<div id="after"></div>`;
-  html += `<div class="nav"><button type="button" id="next">Next</button></div>`;
+  const hasKey = q.answer != null && q.answer !== "";
+  html += `<p class="result" id="result"></p>`;
+  html += `<div class="nav"><button type="button" id="prev" ${pos > 0 ? "" : "disabled"}>Previous</button>` +
+    `<button type="button" id="next">Next</button>` +
+    (hasKey ? `<button type="button" id="reveal" hidden>${q.explanation ? "Show explanation" : "Show answer"}</button>` : "") + `</div>`;
+  html += `<div id="more"></div>`;
   $("right").innerHTML = html;
   window.scrollTo(0, 0);
 
   for (const b of $("right").querySelectorAll(".choice")) b.addEventListener("click", () => answer(b.dataset.letter));
   const form = $("tita");
   if (form) form.addEventListener("submit", (e) => { e.preventDefault(); answer($("titaInput").value); });
+  $("prev").addEventListener("click", previous);
   $("next").addEventListener("click", next);
-
-  const prev = progress[q.id];
-  if (prev && prev.a != null && !prefs.redo && !prefs.wrongOnly) reveal(prev.a, false);
+  if ($("reveal")) $("reveal").addEventListener("click", () => { entry.shown = true; paint(entry); $("next").focus({ preventScroll: true }); });
+  paint(entry);
 }
 
 function norm(s) {
   return String(s).toUpperCase().replace(/[^A-Z0-9]/g, "");
 }
 
-function answer(given) {
-  if (!current || $("right").dataset.answered === current.id) return;
-  if (!current.choices?.length && !String(given).trim()) return;
-  reveal(given, true);
+function isRight(q, given) {
+  return q.answer != null && q.answer !== "" && norm(given) === norm(q.answer);
 }
 
-function reveal(given, record) {
-  const q = current;
-  $("right").dataset.answered = q.id;
-  const has = q.answer != null && q.answer !== "";
-  const ok = has && norm(given) === norm(q.answer);
-  if (record) {
-    progress[q.id] = { r: has ? (ok ? "c" : "w") : "u", a: given, t: Date.now() };
+function answer(given) {
+  const entry = trail[pos];
+  if (!entry || entry.q !== current || entry.done || entry.shown) return;
+  const q = entry.q;
+  if (!q.choices?.length && !String(given).trim()) return;
+  if (entry.tries.some((t) => norm(t) === norm(given))) return;
+  const hasKey = q.answer != null && q.answer !== "";
+  if (!entry.tries.length) {  // only the first try counts
+    progress[q.id] = { r: hasKey ? (isRight(q, given) ? "c" : "w") : "u", a: given, t: Date.now() };
     save(STORE, progress);
     renderProgress();
   }
+  entry.tries.push(given);
+  if (!hasKey || isRight(q, given)) entry.done = true;
+  paint(entry);
+  if (entry.done) $("next").focus({ preventScroll: true });
+}
+
+// Draw the entry's state: tried choices, Yes/No, and the answer + explanation once revealed.
+function paint(entry) {
+  const q = entry.q;
+  const hasKey = q.answer != null && q.answer !== "";
+  const locked = entry.done || entry.shown;
   for (const b of $("right").querySelectorAll(".choice")) {
-    b.disabled = true;
     const L = b.dataset.letter;
-    if (L === given) b.classList.add("picked");
-    if (has && L === q.answer) {
-      b.classList.add("correct");
-      b.insertAdjacentHTML("beforeend", `<span class="mark">✓ answer</span>`);
-    } else if (L === given && has) {
-      b.insertAdjacentHTML("beforeend", `<span class="mark">✗</span>`);
-    }
+    const tried = entry.tries.includes(L);
+    const correct = hasKey && L === q.answer && (tried || entry.shown);
+    b.classList.toggle("picked", tried);
+    b.classList.toggle("correct", correct);
+    b.disabled = locked || tried;
+    b.querySelector(".mark")?.remove();
+    const mark = correct ? (tried ? "✓" : "✓ answer") : (tried && hasKey ? "✗" : "");
+    if (mark) b.insertAdjacentHTML("beforeend", `<span class="mark">${mark}</span>`);
   }
   const input = $("titaInput");
-  if (input) { input.value = given; input.disabled = true; }
-
-  let out = "";
-  if (!has) out += `<p class="result">Recorded. This source has no answer key.</p>`;
-  else if (ok) out += `<p class="result">Correct.</p>`;
-  else out += `<p class="result">Incorrect. The answer is ${esc(q.answer)}.</p>`;
-  if (q.note) out += `<p class="note">${esc(q.note)}</p>`;
-  if (q.explanation) out += `<div class="explanation" lang="${q.lang || "en"}">${paras(q.explanation)}</div>`;
-  $("after").innerHTML = out;
-  $("next").focus({ preventScroll: true });
+  if (input) {
+    if (entry.tries.length) input.value = entry.tries[entry.tries.length - 1];
+    input.disabled = locked;
+    if (!locked && entry.tries.length) input.select();
+  }
+  const last = entry.tries[entry.tries.length - 1];
+  let result = "";
+  if (entry.tries.length) result = !hasKey ? "Recorded (this source has no answer key)." : isRight(q, last) ? "Yes." : "No.";
+  if (entry.shown && !entry.done) result = (result ? result + " " : "") + (q.choices?.length ? "" : `Answer: ${q.answer}`);
+  $("result").textContent = result;
+  if ($("reveal")) $("reveal").hidden = !entry.tries.length || entry.shown;
+  let more = "";
+  if (entry.shown || (entry.done && !hasKey)) {
+    if (q.note) more += `<p class="note">${esc(q.note)}</p>`;
+    if (q.explanation) more += `<div class="explanation" lang="${q.lang || "en"}">${paras(q.explanation)}</div>`;
+  }
+  $("more").innerHTML = more;
 }
 
 function onKey(e) {
@@ -230,8 +271,10 @@ function onKey(e) {
   const k = e.key.toUpperCase();
   if (current?.choices?.length && k.length === 1 && LETTERS.indexOf(k) >= 0 && LETTERS.indexOf(k) < current.choices.length) {
     answer(k);
-  } else if (e.key === "Enter" && t?.tagName !== "BUTTON") {
+  } else if (e.key === "ArrowRight" || (e.key === "Enter" && t?.tagName !== "BUTTON")) {
     next();
+  } else if (e.key === "ArrowLeft") {
+    previous();
   }
 }
 

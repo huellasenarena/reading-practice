@@ -1,7 +1,7 @@
 """SAT Reading and Writing question bank export (~/Downloads/questionbank-export-*.pdf)."""
 import glob, os, re
 import pymupdf
-from common import IMG, save_png, write
+from common import IMG, mark_hyphen, save_png, write
 
 SRC = sorted(glob.glob(os.path.expanduser("~/Downloads/questionbank-export-*.pdf")))[-1]
 COLS = [19, 134, 248, 364, 478, 595]  # header table: Assessment, Test, Domain, Skill, Difficulty
@@ -50,6 +50,8 @@ def page_lines(page):
             prev["x1"] = ln["x1"]
         else:
             merged.append(ln)
+    for ln in merged:
+        ln["text"] = mark_hyphen(ln["text"])
     return merged
 
 

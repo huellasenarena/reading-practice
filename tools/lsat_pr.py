@@ -21,6 +21,12 @@ KEYS = {
     4: "EDBDBCBAEDCCECDACBEAACCABAC",  # from screenshots of the final report
 }
 SECTION_KIND = {1: "LR", 2: "RC", 3: "LR", 4: "RC"}
+# OCR misreads, checked against the screenshots (the other oddities, e.g. "explixaría", are in LawHub's text)
+OCR_FIXES = {
+    "queivivan": 'que "vivan', "idealesiy": 'ideales" y', "estuerzo": "esfuerzo",
+    "imuerte por entropía": '"muerte por entropía', "multimillonarioi": 'multimillonario"',
+    "tostatos": "fosfatos", "los panales": "los pañales",
+}
 
 LR_TYPES = [  # Spanish question stems
     ("Parallel Flaw", r"(paralel|similar|se asemeja).*(defectuos|error|vulnerable)"),
@@ -81,6 +87,15 @@ def page_lines(items):
             continue
         if re.fullmatch(r"[A-Z]", t) and 1280 < x < 1400:
             circles.append((t, y + h / 2)); continue
+        if re.fullmatch(r"[\d\s|\[\]/]+", t):
+            continue  # the row of question numbers at the bottom of the screen
+        if h <= 20 and conf < 1:
+            continue  # the top or bottom sliver of a line cut off by the screen edge ("ЛоИ, цИС")
+        m = re.search(r"\s\d{1,2}\.\s", t)
+        if x < SPLIT_X < x + w - 100 and m:
+            t = t[:m.start()]  # one OCR box ran across both panes into the question number
+        for bad, good in OCR_FIXES.items():
+            t = t.replace(bad, good)
         # OCR is least reliable at the screen edges, where lines may be cut off
         lines.append({"t": t, "x": x, "y": y, "h": h, "c": conf, "m": min(y - 280, 1200 - (y + h))})
     return qn, sec, lines, circles
@@ -151,7 +166,8 @@ def main():
     ocr = json.load(open(OCR))
     for k, items in json.load(open(STEM_OCR)).items():
         ocr[k] = [it for it in ocr[k] if not (it[2][0] >= 1200 and 250 <= it[2][1] < 460)] + items
-    order = sorted(ocr, key=lambda k: (k.split("-")[0] != "s1", int(k.split("-")[1])))
+    # "extra" screenshots (pr_ocr.py extra) come last, so they extend what the earlier ones show
+    order = sorted(ocr, key=lambda k: (["s1", "rest", "extra"].index(k.split("-")[0]), int(k.split("-")[1])))
     groups, sec = {}, 1
     for k in order:
         qn, s, lines, circles = page_lines(ocr[k])

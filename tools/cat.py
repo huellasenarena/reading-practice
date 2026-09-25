@@ -19,6 +19,8 @@ def text(el):
     s = re.sub(r"\n{2,}", "\n\n", s)
     # single <br> separates numbered sentences; keep those as paragraphs too
     s = re.sub(r"\n(?=\s*\d\.\s)", "\n\n", s)
+    # hyphens left from line breaks in the pasted pages ("folk- rock", "pre- industrial")
+    s = re.sub(r"(?<=[a-z])- (?!(?:and|or|to)\b)(?=[a-z])", "-", s)
     return s.strip()
 
 

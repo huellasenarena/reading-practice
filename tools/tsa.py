@@ -1,7 +1,7 @@
 """Oxford TSA Section 1 papers (~/Downloads/TSA <year> Section 1.pdf) and answer keys."""
 import os, re
 import pymupdf
-from common import IMG, save_png, write
+from common import IMG, mark_hyphen, save_png, write
 
 YEARS = range(2008, 2023)
 DL = os.path.expanduser("~/Downloads")
@@ -36,7 +36,12 @@ def page_lines(page, shift_fonts):
 
     def emit(spans):
         txt = "".join(decode(s, shift_fonts) for s in spans)
-        txt = " ".join(txt.split())
+        if shift_fonts:
+            txt = txt.translate(ENCODED_PUNCT)
+            # a space or bullet that went through the shift ("Green =87", "z=1 playing board")
+            txt = re.sub(r"\bz=(?=\S)", "• ", txt)
+            txt = re.sub(r"(?<! )=|=(?! )", " ", txt)
+        txt = mark_hyphen(" ".join(txt.split()))
         if txt:
             x0 = min(s["bbox"][0] for s in spans if decode(s, shift_fonts).strip())
             out.append({"x0": x0, "y0": min(s["bbox"][1] for s in spans), "x1": max(s["bbox"][2] for s in spans),
@@ -78,9 +83,14 @@ def decode(span, shift_fonts):
     if span["font"] in shift_fonts or any(ord(c) < 0x20 for c in t) or t.strip() in ("$", "%", "&", "'", "("):
         return shifted(t)
     lower = lambda x: len(re.findall(r"[a-z]", x))
-    if lower(shifted(t)) > lower(t):
+    # an encoded word has no real spaces or lower-case letters; plain capitals ("BLANK PAGE") stay as they are
+    if lower(shifted(t)) > lower(t) and " " not in t and not lower(t):
         return shifted(t)  # e.g. an italic word in another encoded font
     return t
+
+
+# punctuation that the encoded fonts leave behind after shifting
+ENCODED_PUNCT = str.maketrans({"³": "“", "´": "”", "µ": "‘", "¶": "’", "±": "–", "\x83": "°"})
 
 
 def figure_rects(page):
@@ -145,7 +155,7 @@ def parse(year):
             t = ln["text"]
             w = page.rect.width
             page_no = re.fullmatch(r"\d{1,2}", t) and abs((ln["x0"] + ln["x1"]) / 2 - w / 2) < 40 and (ln["y0"] < 80 or ln["y1"] > h - 80)
-            if page_no or ln["y0"] < 30 or ln["y1"] > h - 45 or "UCLES" in t or t.lower() in ("blank page", "[turn over", "turn over") \
+            if page_no or ln["y0"] < 30 or ln["y1"] > h - 45 or "UCLES" in t or t.lower() in ("blank page", "[turn over", "turn over", "end of test") \
                     or re.fullmatch(r"\[?turn over\]?", t, re.I):
                 continue
             ln["page"] = pno
@@ -215,7 +225,9 @@ def parse(year):
             "question": stem,
             "choices": choices,
         }
-        missing_choice_text = len(choices) != 5 or any(not c for c in choices)
+        # charts or diagrams drawn as the choices themselves
+        choice_figs = chl and any(p * PAGE_OFF + r.y0 > region[chl[0]]["y0"] for p, r in fig)
+        missing_choice_text = len(choices) != 5 or any(not c for c in choices) or bool(choice_figs)
         if fig or missing_choice_text:
             # render the question block as an image (per page) so diagrams and tables survive
             first_choice_y = region[chl[0]]["y0"] if chl and not missing_choice_text else y_bot + 4

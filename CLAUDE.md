@@ -42,6 +42,10 @@ Python scripts rebuild `data/` and `img/`. PyMuPDF is used for PDFs, BeautifulSo
 
 Originals are not committed: `sources/` is git-ignored, and the PDFs live in `~/Downloads` and `~/Desktop`.
 
+Run the scripts from `tools/` with the project's virtualenv (`.venv/`, git-ignored): `python3 -m venv .venv && .venv/bin/pip install -r tools/requirements.txt`, then e.g. `cd tools && ../.venv/bin/python tsa.py`. The scripts are deterministic, so a rebuild with no script changes leaves `data/` and `img/` unchanged in git.
+
+A hyphen that ends a PDF line is marked by the extractor (`mark_hyphen()` in `common.py`) and joined to the next word by `clean()`. A hyphen followed by a space inside a line is kept as printed (e.g. SAT's "the affix meng- among", "ninth- through eleventh-century").
+
 | Script | Source | Notes |
 |---|---|---|
 | `lsat.py` | `~/Desktop/lsat 140/141/151/158.pdf` (LSAT Warthog printouts) | `lsat 151.pdf` is actually PrepTest 157. Answer key and per-choice explanations are included. |
@@ -63,13 +67,16 @@ Originals are not committed: `sources/` is git-ignored, and the PDFs live in `~/
 - There are no explanations.
 
 **TSA (`tsa.py`)**
-- 2012–2014 use fonts with char codes shifted by 29; `decode()` handles this.
+- 2012–2014 use fonts with char codes shifted by 29; `decode()` handles this. Plain ALL-CAPS text ("BLANK PAGE") must not be shifted, and `ENCODED_PUNCT` maps the leftover ¶ µ ³ ´ ± \x83 to quotes, dashes and °.
 - Critical Thinking vs Problem Solving is decided by regex on the stem, giving 25/25 per year.
-- Figures and figure-only choices are cropped to `img/tsa/`.
+- Figures and figure-only choices are cropped to `img/tsa/`. When a figure sits among the choices (charts as options), the whole block including the choices is cropped and the choice texts are left blank.
 
 **TAGE MAGE (`tage.py`)**
 - The Executive booklet has no section headings, so it uses the hand-made `EXEC_SUBTESTS` map and `PASSAGE_STARTS`.
-- Non-verbal questions are cropped to images.
+- Non-verbal questions are cropped to images, rendered with `annots=False` (the livret PDF carries a previous owner's ink answer marks and highlights).
+- The livret prints Logique 6–25 in two columns; `_columns()` reorders those lines and crops each question to its column.
+- Fractions and exponents do not survive as text. Where they appear in the choices (small-size text, stacked fragments, or a formula piece on the choice row), the choices stay in the image and the text choices are blank. Where they appear in a Conditions minimales stem, the text stem is dropped because the image shows it.
+- "A." only counts as a choice label at the start of a line ("… à 70 km de A. Quelle …" is not choice A).
 - Conditions minimales get the standard A–E choices.
 - The livret has no questions for Calcul 30, Raisonnement 14–15 or Logique 5; its key marks them "/".
 - Explanations exist only for the Ecricome test.
@@ -78,12 +85,14 @@ Originals are not committed: `sources/` is git-ignored, and the PDFs live in `~/
 - Merges overlapping screenshots: offsets are voted from identical lines, with a fuzzy fallback. When two copies of a line conflict, the one captured further from the screen edge is kept.
 - Every RC question in a set gets the most complete copy of its passage.
 - The answer keys in `KEYS` were read by hand from the LawHub review tables. Section 4's key came from screenshots the owner sent.
+- The section 4 passage for questions 22–27 was completed from later screenshots in `sources/pr/extra/`. `pr_ocr.py extra` OCRs only that folder into `ocr.json` as `extra-<i>`, and `lsat_pr.py` merges those shots last.
+- `page_lines()` drops the question-number row at the bottom of the screen and half-lines cut off at the screen edge. `OCR_FIXES` holds misreads that were checked against the screenshots. Other oddities, such as "explixaría", "per es una" and "podrían se", are in LawHub's own text and are kept.
 
 ## Status (2026-09-24)
 
 - 2,779 questions, and every one has an answer.
-- 16 randomly sampled keys were checked by solving the questions; all were correct.
+- Stratified answer-key check (2026-09-24): 272 questions solved blind, 2–3 from every paper and section. No key errors were found. Every disagreement was re-checked and the key held: official livret grid for all 141 livret questions, Ecricome explanations, 2IIM source pages for CAT, and pixel measurement for TSA figures.
+- The same check found broken text and images, all fixed in the scripts: TAGE livret Logique pairs, ink marks, answer grid in Q30, split stems, lost fractions; TSA blank pages, chart choices missing, 2012–2014 characters; PR truncated passage, OCR junk; line-break hyphens everywhere.
 - Question types for non-SAT tests come from regexes on the stem wording, so a few may be misfiled.
 - The Puerto Rico OCR occasionally drops an accent.
-- Possible next step, not yet done: a stratified answer-key check of about 150 questions (2–3 from every paper, start/middle/end), emphasising TSA, TAGE MAGE, LSAT Puerto Rico and CAT, whose keys are separate from the questions. Report mismatches before changing any data.
 - Progress is per device only. If the owner wants syncing, the suggestion was a private GitHub Gist (or an export/import button).

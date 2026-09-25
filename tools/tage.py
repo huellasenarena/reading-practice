@@ -1,7 +1,7 @@
 """TAGE MAGE practice booklets (French). Three PDFs with different layouts."""
 import os, re
 import pymupdf
-from common import IMG, save_png, write
+from common import IMG, mark_hyphen, save_png, write
 
 DL = os.path.expanduser("~/Downloads")
 SOURCES = [  # file, id prefix, label shown in the site
@@ -40,6 +40,9 @@ CHOICE_RE = re.compile(r"(?:^|(?<=\s))([A-E])\s*(?:\)\s*\.?|\.|\s-|\s–)\s*")
 
 def doc_lines(doc):
     out = []
+    sizes = sorted(s["size"] for p in doc for b in p.get_text("dict")["blocks"] for l in b.get("lines", [])
+                   for s in l["spans"] if s["text"].strip())
+    body = sizes[len(sizes) // 2]
     for pno, page in enumerate(doc):
         h = page.rect.height
         for b in page.get_text("dict")["blocks"]:
@@ -47,7 +50,7 @@ def doc_lines(doc):
                 txt = "".join(s["text"] for s in l["spans"])
                 txt = re.sub(r" {4,}", " ___ ", txt)  # fill-in blanks are drawn as long runs of spaces
                 txt = re.sub(r"(?:_{3}\s*)?\.{4,}(?:\s*_{3})?", "______", txt)  # ...and as dotted lines
-                txt = " ".join(txt.split())
+                txt = mark_hyphen(" ".join(txt.split()))
                 if not txt:
                     continue
                 x0, y0, x1, y1 = l["bbox"]
@@ -55,9 +58,61 @@ def doc_lines(doc):
                     continue
                 if "HUB ECRICOME" in txt or "Tous droits réservés" in txt:
                     continue
+                txt = re.sub(r"\b1'(?=[A-ZÀ-Ý])", "l'", txt)  # "1'ADN", "1'OMS" in the livret's text layer
+                txt = re.sub(r"\bI1\b", "Il", txt)
                 bold = any("Bold" in s["font"] for s in l["spans"] if s["text"].strip())
-                out.append({"page": pno, "x0": x0, "y0": y0, "x1": x1, "y1": y1, "text": txt, "bold": bold})
-    out.sort(key=lambda l: (l["page"], round(l["y0"]), l["x0"]))
+                # exponents and small fractions are set in a smaller size, on their own line fragments
+                sup = any(s["size"] < 0.75 * body for s in l["spans"] if s["text"].strip())
+                out.append({"page": pno, "x0": x0, "y0": y0, "x1": x1, "y1": y1, "text": txt, "bold": bold, "sup": sup})
+    out.sort(key=lambda l: (l["page"], l["y0"]))
+    # a row is lines within 3pt of each other (a fraction can start just above its "Question n." label)
+    rows = []
+    for ln in out:
+        if rows and ln["page"] == rows[-1][0]["page"] and ln["y0"] - rows[-1][0]["y0"] <= 3:
+            rows[-1].append(ln)
+        else:
+            rows.append([ln])
+    return _columns([ln for row in rows for ln in sorted(row, key=lambda l: l["x0"])])
+
+
+def _columns(lines):
+    """The livret prints some Logique questions in two columns ("Question 6." and "Question 7." side by side).
+    From such a row to the next one, put the left column's lines before the right column's."""
+    head = lambda l: l["bold"] and re.match(r"Question\s*\d+", l["text"])
+    out, i = [], 0
+    while i < len(lines):
+        ln = lines[i]
+        pair = [l for l in lines[i:i + 2] if head(l) and l["page"] == ln["page"] and abs(l["y0"] - ln["y0"]) <= 3]
+        if len(pair) == 2 and pair[1]["x0"] > 250:
+            split = pair[1]["x0"] - 5
+            j = i + 2
+            while j < len(lines) and lines[j]["page"] == ln["page"] and not (head(lines[j]) and lines[j]["x0"] < split):
+                j += 1
+            band = lines[i:j]
+            left = [dict(l, col=(0, split)) for l in band if l["x0"] < split]
+            right = [dict(l, col=(split, None)) for l in band if l["x0"] >= split]
+            # each column pair starts a new band, so split the band at the next pair of headings too
+            out += _pairwise(left, right, head)
+            i = j
+        else:
+            out.append(ln)
+            i += 1
+    return out
+
+
+def _pairwise(left, right, head):
+    """Interleave column blocks: left question k, right question k, left question k+1, ..."""
+    def blocks(col):
+        bl = []
+        for l in col:
+            if head(l) or not bl:
+                bl.append([])
+            bl[-1].append(l)
+        return bl
+    lb, rb = blocks(left), blocks(right)
+    out = []
+    for k in range(max(len(lb), len(rb))):
+        out += (lb[k] if k < len(lb) else []) + (rb[k] if k < len(rb) else [])
     return out
 
 
@@ -76,6 +131,8 @@ def split_choices(lines):
         t, pos = ln["text"], 0
         for m in CHOICE_RE.finditer(t):
             if want == "F" or m.group(1) != want:
+                continue
+            if m.start() > 0 and ")" not in m.group(0):
                 continue
             add(t[pos:m.start()].strip())
             choices.append("")
@@ -187,11 +244,14 @@ def crop(doc, block, next_top, stop_line, rel):
     """Render a question block as one image per page."""
     top = block["top"]
     lines = [block["top"]] + block["lines"]
+    cx0, cx1 = top.get("col") or (None, None)  # column bounds for two-column pages
     end_page = lines[-1]["page"] if stop_line is None else stop_line["page"]
     paths = []
     for p in range(top["page"], end_page + 1):
         page = doc[p]
-        y0 = top["y0"] - 4 if p == top["page"] else 50
+        # start just above the question's first row (a fraction there can sit higher than the label)
+        row = [l["y0"] for l in lines if l["page"] == p and abs(l["y0"] - top["y0"]) <= 3]
+        y0 = min(row) - 1.5 if p == top["page"] else 50
         on_page = [l for l in lines if l["page"] == p]
         y1 = max([l["y1"] for l in on_page] + [y0 + 10])
         if stop_line is not None and stop_line["page"] == p:
@@ -201,15 +261,26 @@ def crop(doc, block, next_top, stop_line, rel):
         if stop_line is None or stop_line["page"] != p:
             for r in [d["rect"] for d in page.get_drawings()] + [pymupdf.Rect(b["bbox"]) for b in
                                                                   page.get_text("dict")["blocks"] if b["type"] == 1]:
-                if r.y0 >= y0 and r.y1 <= limit and r.width * r.height > 20:
+                in_col = (cx0 is None or r.x0 >= cx0 - 5) and (cx1 is None or r.x1 <= cx1 + 5)
+                if r.y0 >= y0 and r.y1 <= limit and r.width * r.height > 20 and in_col:
                     y1 = max(y1, r.y1 + 3)
         if y1 - y0 < 8:
             continue
-        clip = pymupdf.Rect(30, y0, page.rect.width - 25, y1 + 2)
+        clip = pymupdf.Rect(max(30, cx0 or 0), y0, cx1 or page.rect.width - 25, y1 + 2)
         path = rel if not paths else rel.replace(".png", f"-{len(paths) + 1}.png")
-        save_png(page.get_pixmap(clip=clip, dpi=130), path)
+        # annots=False leaves out a previous owner's ink answer marks and highlights
+        save_png(page.get_pixmap(clip=clip, dpi=130, annots=False), path)
         paths.append(path)
     return paths[0] if len(paths) == 1 else paths
+
+
+def is_math(line, margin):
+    """Exponent-sized text, or a fragment of a stacked fraction ("+", "b", "2") set off from the margin."""
+    return line["sup"] or (len(line["text"]) <= 3 and line["x0"] > margin + 20)
+
+
+def stem_lines_src(block, first):
+    return block["lines"][:first] if first is not None else block["lines"]
 
 
 def main():
@@ -251,9 +322,31 @@ def main():
                 q["choices"] = [c.strip(" _") for c in choices]
             else:
                 q["choices"] = [""] * 5
+            # fractions and exponents in the choices do not survive as text: keep them in the image instead
+            margin = min([l["x0"] for l in b["lines"]] or [0])
+            tail = b["lines"][first:] if first is not None else []
+            labelled = [l for l in tail if CHOICE_RE.match(l["text"])]
+            # a formula piece (e.g. a denominator) printed on the same row as the choices
+            stray = any(not CHOICE_RE.match(l["text"]) and any(abs(l["y0"] - o["y0"]) <= 3 for o in labelled)
+                        for l in tail)
+            math = sub != 4 and not verbal and len(choices) == 5 and (
+                len(set(choices)) < 5 or stray or any(is_math(l, margin) for l in tail))
+            if math:
+                q["choices"] = [""] * 5
+            # same for a Conditions minimales stem with a formula: the image already shows it
+            if sub == 4 and any(is_math(l, margin) for l in stem_lines_src(b, first)):
+                q["question"] = consigne or ""
             if not verbal or len(choices) != 5 and sub != 4:
-                nxt = blocks[bi + 1]["top"] if bi + 1 < len(blocks) else None
-                stop = b["lines"][first] if (first is not None and len(choices) == 5 and sub != 4) else None
+                side = lambda blk: bool(blk["top"].get("col") and blk["top"]["col"][0] > 0)
+                nxt = next((o["top"] for o in blocks[bi + 1:] if side(o) == side(b)), None)
+                if nxt is None:  # last question: stop at whatever follows it (the livret's answer grid)
+                    last = (b["lines"] or [b["top"]])[-1]
+                    k = next(k for k, l in enumerate(lines) if l is last)
+                    nxt = lines[k + 1] if k + 1 < len(lines) else None
+                stop = b["lines"][first] if (first is not None and len(choices) == 5 and sub != 4 and not math) else None
+                # choice A on the same row as the end of the stem: keep the whole block
+                if stop and any(l["page"] == stop["page"] and l["y1"] > stop["y0"] + 2 for l in b["lines"][:first]):
+                    stop = None
                 q["image"] = crop(doc, b, nxt, stop, f"img/tage/{prefix}-{sub}-{n}.png")
                 if sub != 4:
                     q["question"] = consigne or ""

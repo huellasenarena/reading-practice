@@ -24,11 +24,22 @@ IMG = os.path.join(ROOT, "img")
 LETTERS = "ABCDEFGH"
 
 
+# Extractors append this to a line that ends in a hyphen after a letter; clean() then joins the next word
+# to it ("blue-" + "feathered" -> "blue-feathered") while a hyphen and space inside a line ("the affix
+# meng- among", "ninth- through eleventh-century") stay as printed.
+LINE_END_HYPHEN = ""
+
+
+def mark_hyphen(text):
+    return text + LINE_END_HYPHEN if re.search(r"[^\W\d_]-$", text) else text
+
+
 def clean(s):
     """Collapse whitespace inside paragraphs but keep blank-line paragraph breaks."""
     if s is None:
         return None
     s = unicodedata.normalize("NFC", s).replace(" ", " ").replace("\r", "")
+    s = re.sub(LINE_END_HYPHEN + r"[ \t]*(?=[^\W\d_])", "", s).replace(LINE_END_HYPHEN, "")
     paras = re.split(r"\n\s*\n", s)
     paras = [" ".join(p.split()) for p in paras]
     return "\n\n".join(p for p in paras if p)

@@ -1,8 +1,31 @@
-"""OCR the Puerto Rico LSAT screenshots (LawHub) with the macOS Vision framework -> sources/pr/ocr.json."""
-import pymupdf, os, sys, json, io
+"""OCR the Puerto Rico LSAT screenshots (LawHub) with the macOS Vision framework -> sources/pr/ocr.json.
+
+`python3 pr_ocr.py extra` OCRs only sources/pr/extra/*.png (later screenshots, e.g. the rest of the
+section 4 passage for questions 22-27) and adds them to the existing ocr.json as "extra-<i>".
+"""
+import glob, pymupdf, os, sys, json, io
 from ocrmac import ocrmac
 from PIL import Image
 OUT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "sources", "pr")
+
+
+def ocr_image(img):
+    W, H = img.size
+    crop = img.crop((int(W * 0.15), int(H * 0.26), W, int(H * 0.96)))  # drop sidebar and browser chrome
+    res = ocrmac.OCR(crop, language_preference=["es-ES", "en-US"], recognition_level="accurate").recognize()
+    cw, ch = crop.size
+    return [[t, round(c, 2), [round(b[0] * cw), round((1 - b[1] - b[3]) * ch), round(b[2] * cw), round(b[3] * ch)]] for t, c, b in res]
+
+
+if sys.argv[1:] == ["extra"]:
+    path = os.path.join(OUT, "ocr.json")
+    out = {k: v for k, v in json.load(open(path)).items() if not k.startswith("extra-")}
+    for i, f in enumerate(sorted(glob.glob(os.path.join(OUT, "extra", "*.png")))):
+        out[f"extra-{i}"] = ocr_image(Image.open(f).convert("RGB"))
+    json.dump(out, open(path, "w"), ensure_ascii=False)
+    print(len(out))
+    sys.exit()
+
 out = {}
 for key, f in (("s1", "~/Desktop/puerto rico.pdf"), ("rest", "~/Desktop/rest of pr lsat.pdf")):
     d = pymupdf.open(os.path.expanduser(f))
@@ -11,11 +34,7 @@ for key, f in (("s1", "~/Desktop/puerto rico.pdf"), ("rest", "~/Desktop/rest of 
         if i >= len(d): continue
         xref = d[i].get_images()[0][0]
         img = Image.open(io.BytesIO(d.extract_image(xref)["image"]))
-        W, H = img.size
-        crop = img.crop((int(W * 0.15), int(H * 0.26), W, int(H * 0.96)))  # drop sidebar and browser chrome
-        res = ocrmac.OCR(crop, language_preference=["es-ES", "en-US"], recognition_level="accurate").recognize()
-        cw, ch = crop.size
-        out[f"{key}-{i}"] = [[t, round(c, 2), [round(b[0] * cw), round((1 - b[1] - b[3]) * ch), round(b[2] * cw), round(b[3] * ch)]] for t, c, b in res]
+        out[f"{key}-{i}"] = ocr_image(img)
     if len(sys.argv) >= 2: break
 json.dump(out, open(os.path.join(OUT, "ocr.json" if len(sys.argv) < 2 else "ocr_test.json"), "w"), ensure_ascii=False)
 print(len(out))

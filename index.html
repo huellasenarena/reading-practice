@@ -3,6 +3,12 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#121212" media="(prefers-color-scheme: dark)">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Reading">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
 <title>Reading Practice</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><rect width='16' height='16' fill='%23111'/><text x='8' y='12.5' font-size='12' text-anchor='middle' fill='%23fff' font-family='Georgia'>R</text></svg>">
 <link rel="stylesheet" href="style.css">
@@ -16,6 +22,7 @@
       <label><input type="checkbox" id="verbalOnly"> verbal only</label>
       <label><input type="checkbox" id="redo"> include done</label>
       <label><input type="checkbox" id="wrongOnly"> wrong only</label>
+      <label><input type="checkbox" id="starredOnly"> starred only</label>
     </div>
     <div class="progress" id="progress"></div>
   </div>
@@ -25,7 +32,9 @@
   </main>
   <footer class="foot">
     <span class="muted">Keys: A–E choose · → or Enter next · ← previous</span>
-    <span class="footlinks"><button type="button" id="exportFlags" class="link" hidden></button>
+    <span class="footlinks"><span class="muted" id="offline"></span>
+    <button type="button" id="historyLink" class="link">history</button>
+    <button type="button" id="exportFlags" class="link" hidden></button>
     <button type="button" id="reset" class="link">reset progress</button></span>
   </footer>
 </div>

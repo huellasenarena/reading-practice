@@ -5,13 +5,19 @@ const LETTERS = "ABCDEFGH";
 const STORE = "rp-progress-v1";
 const PREFS = "rp-prefs-v1";
 const FLAGS = "rp-flags-v1";
+const STARS = "rp-stars-v1";
+const HISTORY = "rp-history-v1";
+const HISTORY_MAX = 200;
 const $ = (id) => document.getElementById(id);
 
 let all = [];           // every question
 let current = null;     // question on screen
 let progress = load(STORE, {});   // id -> {r: "c" | "w" | "u", a: answer given, t: time}
 let flags = load(FLAGS, {});      // id -> {t: time, note: text}: questions the owner thinks are wrong
-let prefs = load(PREFS, { test: "", type: "", verbalOnly: false, redo: false, wrongOnly: false });
+let stars = load(STARS, {});      // id -> time starred
+let seen = load(HISTORY, []);     // [{id, t}], newest first: questions shown, across visits
+let prefs = load(PREFS, { test: "", type: "", verbalOnly: false, redo: false, wrongOnly: false, starredOnly: false });
+let listView = null;              // "recent" or "starred" while the history page is open
 
 function load(key, fallback) {
   try { return JSON.parse(localStorage.getItem(key)) || fallback; } catch { return fallback; }
@@ -42,7 +48,7 @@ async function init() {
   const sets = await Promise.all(files.map((f) => getJSON(`data/${f}.json`)));
   all = sets.flat();
   buildTestSelect();
-  for (const id of ["verbalOnly", "redo", "wrongOnly"]) {
+  for (const id of ["verbalOnly", "redo", "wrongOnly", "starredOnly"]) {
     $(id).checked = !!prefs[id];
     $(id).addEventListener("change", () => { prefs[id] = $(id).checked; save(PREFS, prefs); refresh(true); });
   }
@@ -50,12 +56,33 @@ async function init() {
   $("type").addEventListener("change", () => { prefs.type = $("type").value; save(PREFS, prefs); refresh(true); });
   $("reset").addEventListener("click", resetProgress);
   $("exportFlags").addEventListener("click", exportFlags);
+  $("historyLink").addEventListener("click", () => showList("recent"));
   renderFlagCount();
   document.addEventListener("keydown", onKey);
-  window.addEventListener("hashchange", () => showById(location.hash.slice(1)));
+  // #<id> opens that question; the address bar is then cleared so a bookmark or home-screen icon
+  // saved later is the plain site, not the question that happened to be open.
+  window.addEventListener("hashchange", () => { showById(location.hash.slice(1)); clearHash(); });
   buildTypeSelect();
   renderProgress();
   if (!showById(location.hash.slice(1))) refresh(true);
+  clearHash();
+  offline();
+}
+
+function clearHash() {
+  if (location.hash) history.replaceState(null, "", location.pathname + location.search);
+}
+
+// Offline copy of the site (sw.js). The footer says so once every file is cached.
+function offline() {
+  if (!("serviceWorker" in navigator)) return;
+  navigator.serviceWorker.addEventListener("message", (e) => {
+    if (e.data?.offline) $("offline").textContent = "available offline";
+  });
+  navigator.serviceWorker.register("sw.js")
+    .then(() => navigator.serviceWorker.ready)
+    .then((reg) => reg.active.postMessage("precache"))
+    .catch(() => {});
 }
 
 function buildTestSelect() {
@@ -87,6 +114,7 @@ function buildTypeSelect() {
 function matchesFilters(q) {
   if (prefs.test && q.test !== prefs.test) return false;
   if (prefs.verbalOnly && q.verbal === false) return false;
+  if (prefs.starredOnly && !stars[q.id]) return false;
   if (prefs.type) {
     const [sec, type] = prefs.type.split("|");
     const qsec = prefs.test ? (q.section || "") : q.test;
@@ -103,7 +131,7 @@ function candidates() {
   return pool().filter((q) => {
     const p = progress[q.id];
     if (prefs.wrongOnly) return p && p.r === "w";
-    return prefs.redo || !p;
+    return prefs.redo || prefs.starredOnly || !p;
   });
 }
 
@@ -134,11 +162,11 @@ function next() {
   const list = candidates().filter((q) => !current || q.id !== current.id || candidates().length === 1);
   if (!list.length) {
     current = null;
-    history.replaceState(null, "", location.pathname);
+    listView = null;
     $("main").className = "split single";
     $("left").innerHTML = "";
-    $("right").innerHTML = (prefs.wrongOnly
-      ? `<p>No incorrect questions left for this filter.</p>`
+    $("right").innerHTML = (prefs.wrongOnly ? `<p>No incorrect questions left for this filter.</p>`
+      : prefs.starredOnly ? `<p>No starred questions for this filter.</p>`
       : `<p>You have done every question for this filter.</p><p class="muted">Tick “include done” to see them again.</p>`) +
       (pos > 0 ? `<div class="nav"><button type="button" id="prev">Previous</button></div>` : "");
     if ($("prev")) $("prev").addEventListener("click", previous);
@@ -155,6 +183,8 @@ function visit(q) {
   trail.splice(pos + 1);
   trail.push({ q, tries: [], done: false, shown: false });
   pos = trail.length - 1;
+  seen = [{ id: q.id, t: Date.now() }, ...seen.filter((h) => h.id !== q.id)].slice(0, HISTORY_MAX);
+  save(HISTORY, seen);
   show(trail[pos]);
 }
 
@@ -168,7 +198,7 @@ function showById(id) {
 function show(entry) {
   const q = entry.q;
   current = q;
-  history.replaceState(null, "", "#" + q.id);
+  listView = null;
   const images = q.image ? [].concat(q.image) : [];
   const hasLeft = !!q.passage || images.length > 0;
   $("main").className = hasLeft ? "split" : "split single";
@@ -193,24 +223,41 @@ function show(entry) {
   html += `<div class="nav"><button type="button" id="prev" ${pos > 0 ? "" : "disabled"}>Previous</button>` +
     `<button type="button" id="next">Next</button>` +
     (hasKey ? `<button type="button" id="reveal" hidden>${q.explanation ? "Show explanation" : "Show answer"}</button>` : "") +
-    `<button type="button" id="flag" class="link flag"></button></div>`;
+    `<span class="marks"><button type="button" id="star" class="link"></button>` +
+    `<button type="button" id="flag" class="link"></button></span></div>`;
   html += `<div id="flagNote" hidden><input type="text" id="flagText" placeholder="What looks wrong? (optional)" aria-label="Flag note"></div>`;
   html += `<div id="more"></div>`;
   $("right").innerHTML = html;
-  window.scrollTo(0, 0);
+  $("right").scrollTop = 0;
+  $("main").scrollTop = 0;
 
   for (const b of $("right").querySelectorAll(".choice")) b.addEventListener("click", () => answer(b.dataset.letter));
   const form = $("tita");
   if (form) form.addEventListener("submit", (e) => { e.preventDefault(); answer($("titaInput").value); });
   $("prev").addEventListener("click", previous);
   $("next").addEventListener("click", next);
+  $("star").addEventListener("click", () => toggleStar(q));
   $("flag").addEventListener("click", () => toggleFlag(q));
   $("flagText").addEventListener("input", () => {
     if (flags[q.id]) { flags[q.id].note = $("flagText").value; save(FLAGS, flags); }
   });
+  paintStar(q);
   paintFlag(q);
   if ($("reveal")) $("reveal").addEventListener("click", () => { entry.shown = true; paint(entry); $("next").focus({ preventScroll: true }); });
   paint(entry);
+}
+
+function toggleStar(q) {
+  if (stars[q.id]) delete stars[q.id];
+  else stars[q.id] = Date.now();
+  save(STARS, stars);
+  paintStar(q);
+  if (prefs.starredOnly) renderProgress();
+}
+
+function paintStar(q) {
+  $("star").textContent = stars[q.id] ? "starred" : "star";
+  $("star").title = stars[q.id] ? "Remove the star" : "Keep this question in your starred list";
 }
 
 function toggleFlag(q) {
@@ -247,6 +294,47 @@ function exportFlags() {
   const a = Object.assign(document.createElement("a"), { href: url, download: "flags.json" });
   document.body.append(a); a.click(); a.remove();
   URL.revokeObjectURL(url);
+}
+
+// ---- history page: recently seen questions, or every starred one
+function showList(which) {
+  listView = which;
+  const byId = new Map(all.map((q) => [q.id, q]));
+  const rows = which === "recent"
+    ? seen.map((h) => ({ q: byId.get(h.id), t: h.t }))
+    : Object.entries(stars).sort((a, b) => b[1] - a[1]).map(([id, t]) => ({ q: byId.get(id), t }));
+  const plain = (s) => (s || "").replace(/\*\*|\+\+|\*/g, "").replace(/\s+/g, " ").trim();
+  const when = (t) => new Date(t).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+  const result = (id) => {
+    const p = progress[id];
+    return !p ? "not answered" : p.r === "c" ? "correct" : p.r === "w" ? "incorrect" : "unchecked";
+  };
+  const items = rows.filter((r) => r.q).map(({ q, t }) => {
+    const info = [when(t), q.test, q.type, result(q.id), which === "recent" && stars[q.id] ? "starred" : null].filter(Boolean).join(" · ");
+    return `<li><button type="button" data-id="${esc(q.id)}"><span class="row">${esc(info)}</span>` +
+      `<span class="ex" lang="${q.lang || "en"}">${esc(plain(q.question).slice(0, 200))}</span>` +
+      (q.passage ? `<span class="ex passage" lang="${q.lang || "en"}">${esc(plain(q.passage).slice(0, 200))}</span>` : "") +
+      `</button></li>`;
+  });
+  $("main").className = "split single";
+  $("left").innerHTML = "";
+  $("right").innerHTML =
+    `<div class="list-head"><h2>History</h2>` +
+    `<button type="button" class="link ${which === "recent" ? "on" : ""}" id="listRecent">recent</button>` +
+    `<button type="button" class="link ${which === "starred" ? "on" : ""}" id="listStarred">starred (${Object.keys(stars).length})</button>` +
+    `<button type="button" class="link back" id="listBack">back</button></div>` +
+    (items.length ? `<ul class="list">${items.join("")}</ul>`
+      : `<p class="muted">${which === "recent" ? "No questions seen yet." : "No starred questions yet."}</p>`);
+  $("right").scrollTop = 0;
+  $("main").scrollTop = 0;
+  $("listRecent").addEventListener("click", () => showList("recent"));
+  $("listStarred").addEventListener("click", () => showList("starred"));
+  $("listBack").addEventListener("click", closeList);
+  for (const b of $("right").querySelectorAll(".list button")) b.addEventListener("click", () => visit(byId.get(b.dataset.id)));
+}
+
+function closeList() {
+  if (pos >= 0) show(trail[pos]); else next();
 }
 
 function norm(s) {
@@ -316,6 +404,10 @@ function onKey(e) {
   const t = e.target;
   if (t && (t.tagName === "INPUT" || t.tagName === "SELECT" || t.tagName === "TEXTAREA")) return;
   const k = e.key.toUpperCase();
+  if (listView) {
+    if (e.key === "Escape") closeList();
+    return;
+  }
   if (current?.choices?.length && k.length === 1 && LETTERS.indexOf(k) >= 0 && LETTERS.indexOf(k) < current.choices.length) {
     answer(k);
   } else if (e.key === "ArrowRight" || (e.key === "Enter" && t?.tagName !== "BUTTON")) {

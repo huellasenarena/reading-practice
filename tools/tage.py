@@ -4,10 +4,11 @@ import pymupdf
 from common import IMG, mark_hyphen, save_png, write
 
 DL = os.path.expanduser("~/Downloads")
-SOURCES = [  # file, id prefix, label shown in the site
-    ("test-tage-mage.pdf", "livret", "Livret du candidat (FNEGE)"),
-    ("TEST-D_ENTRAINEMENT-CORRIGÉ-TAGE-MAGE.pdf", "ecricome", "Test d'entraînement corrigé (Ecricome)"),
-    ("livret_tage_exec.pdf", "exec", "TAGE Executive"),
+SOURCES = [  # file, id prefix, label shown in the site, data file it goes to
+    ("test-tage-mage.pdf", "livret", "Livret du candidat (FNEGE)", "tage"),
+    ("TEST-D_ENTRAINEMENT-CORRIGÉ-TAGE-MAGE.pdf", "ecricome", "Test d'entraînement corrigé (Ecricome)", "tage"),
+    ("livret_tage_exec.pdf", "exec", "TAGE Executive", "tage"),
+    ("livret_tage_exec_n°2.pdf", "exec2", "TAGE Executive n°2", "tage-exec2"),
 ]
 SUBTESTS = {
     1: ("Compréhension de texte", True),
@@ -26,15 +27,36 @@ CM_CHOICES = [
 ]
 CORRIGE_HEADS = {"COMPRÉHENSION DE TEXTE": 1, "CALCUL": 2, "RAISONNEMENT ET ARGUMENTATION": 3,
                  "CONDITIONS MINIMALES": 4, "EXPRESSION": 5, "LOGIQUE": 6}
-# the Executive booklet has no section headings: subtest of each question, read off the booklet
-EXEC_SUBTESTS = {n: 5 for n in (1, 2, 3, 4, 5, 16, 17, 18, 19, 20, 22)}
-EXEC_SUBTESTS.update({n: 3 for n in (6, 8, 12, 41, 52, 54, 56)})
-EXEC_SUBTESTS.update({n: 2 for n in (7, 11, 13, 21, 23, 40, 42, 51, 53)})
-EXEC_SUBTESTS.update({n: 6 for n in (9, 10, 14, 24, 26, 28, 30, 37, 39, 43, 45, 58, 60)})
-EXEC_SUBTESTS.update({n: 4 for n in (15, 25, 27, 29, 36, 38, 44, 55, 57, 59)})
-EXEC_SUBTESTS.update({n: 1 for n in (31, 32, 33, 34, 35, 46, 47, 48, 49, 50)})
+
+
+def _subtests(**groups):
+    return {n: SUBTEST_NUM[name] for name, ns in groups.items() for n in ns}
+
+
+SUBTEST_NUM = {"comprehension": 1, "calcul": 2, "raisonnement": 3, "cm": 4, "expression": 5, "logique": 6}
+# the Executive booklets have no section headings: subtest of each question, read off the booklet
+EXEC_SUBTESTS = {
+    "exec": _subtests(expression=(1, 2, 3, 4, 5, 16, 17, 18, 19, 20, 22),
+                      raisonnement=(6, 8, 12, 41, 52, 54, 56),
+                      calcul=(7, 11, 13, 21, 23, 40, 42, 51, 53),
+                      logique=(9, 10, 14, 24, 26, 28, 30, 37, 39, 43, 45, 58, 60),
+                      cm=(15, 25, 27, 29, 36, 38, 44, 55, 57, 59),
+                      comprehension=(31, 32, 33, 34, 35, 46, 47, 48, 49, 50)),
+    "exec2": _subtests(expression=(1, 2, 3, 4, 5, 16, 17, 18, 19, 20),
+                       raisonnement=(7, 9, 11, 13, 22, 41, 52, 54, 56),
+                       calcul=(6, 8, 12, 21, 23, 40, 42, 51, 53),
+                       logique=(10, 14, 24, 26, 28, 30, 37, 39, 43, 45, 58, 60),
+                       cm=(15, 25, 27, 29, 36, 38, 44, 55, 57, 59),
+                       comprehension=(31, 32, 33, 34, 35, 46, 47, 48, 49, 50)),
+}
+# answer keys that are wrong, checked by hand: (prefix, question) -> (answer, note)
+KEY_FIXES = {
+    ("exec2", 23): ("C", "The booklet's key says D (43,3), the average of the lap speeds. Over the 3 laps the average "
+                         "speed is 3 / (1/30 + 2/50) = 40,9 km/h, which is C."),
+}
 # reading passages that are not introduced by a "Texte" heading
-PASSAGE_STARTS = ("Interview du directeur", "Une réforme du Fonds monétaire")
+PASSAGE_STARTS = ("Interview du directeur", "Une réforme du Fonds monétaire",
+                  "Ce texte retranscrit la réponse", "C’est un rêve commun")
 CHOICE_RE = re.compile(r"(?:^|(?<=\s))([A-E])\s*(?:\)\s*\.?|\.|\s-|\s–)\s*")
 
 
@@ -50,7 +72,7 @@ def doc_lines(doc):
                 txt = "".join(s["text"] for s in l["spans"])
                 txt = re.sub(r" {4,}", " ___ ", txt)  # fill-in blanks are drawn as long runs of spaces
                 txt = re.sub(r"(?:_{3}\s*)?\.{4,}(?:\s*_{3})?", "______", txt)  # ...and as dotted lines
-                txt = mark_hyphen(" ".join(txt.split()))
+                txt = mark_hyphen(" ".join(txt.split()).replace(" ,", ","))  # "Humanisme ," after italics
                 if not txt:
                     continue
                 x0, y0, x1, y1 = l["bbox"]
@@ -191,7 +213,10 @@ def parse_doc(fname, prefix, label):
         if cur is not None:
             # after choice E, anything not indented like a continuation belongs to what comes next
             _, ch, _ = split_choices(cur["lines"])
-            if len(ch) == 5 and not (ln["x0"] > cur["lines"][-1]["x0"] + 5 or re.match(r"[a-zà-ü(]", t)) \
+            # (a line ending in "et", "de", a comma... is unfinished, even if the next one starts with a capital)
+            unfinished = re.search(r"(,|\b(et|ou|de|du|des|à|au|aux|la|le|les|un|une|en|que|qui|pour|par|sur|dans|avec))$",
+                                   cur["lines"][-1]["text"])
+            if len(ch) == 5 and not (ln["x0"] > cur["lines"][-1]["x0"] + 5 or re.match(r"[a-zà-ü(]", t) or unfinished) \
                     and cur["sub"] != 4:
                 blocks.append(cur); cur = None
                 pend = [ln]
@@ -285,8 +310,18 @@ def stem_lines_src(block, first):
 
 def main():
     os.makedirs(os.path.join(IMG, "tage"), exist_ok=True)
+    for name in dict.fromkeys(s[3] for s in SOURCES):
+        group = [s[:3] for s in SOURCES if s[3] == name]
+        missing = [f for f, _, _ in group if not os.path.exists(os.path.join(DL, f))]
+        if missing:  # the originals are not committed: leave that data file as it is
+            print(f"skipped data/{name}.json, PDF not found: {', '.join(missing)}")
+            continue
+        write(name, build(group))
+
+
+def build(sources):
     out = []
-    for fname, prefix, label in SOURCES:
+    for fname, prefix, label in sources:
         doc, lines, blocks, consignes = parse_doc(fname, prefix, label)
         keys, expl = answer_keys(doc, lines, prefix)
         # the livret has two sets of Compréhension questions (1-15 and 16-30) etc.; keep numbers as printed
@@ -294,16 +329,16 @@ def main():
             n = b["n"]
             sub = b["sub"]
             consigne = consignes.get((sub, n))
-            if prefix == "exec":
+            if prefix in EXEC_SUBTESTS:
                 consigne = next((v for (s, k), v in consignes.items() if k == n), None)
-                sub = EXEC_SUBTESTS[n]
+                sub = EXEC_SUBTESTS[prefix][n]
             name, verbal = SUBTESTS[sub]
             stem_lines, choices, first = split_choices(b["lines"])
             stem = " ".join(l for l in stem_lines)
             stem = re.sub(r"\s*Vous devez décider si les informations.*", "", stem)
             stem = re.sub(r"\s+(?=\d\)\s)", "\n\n", stem)  # numbered statements on their own lines
             q = {
-                "id": f"tage-{prefix}-{sub}-{n}" if prefix != "exec" else f"tage-exec-{n}",
+                "id": f"tage-{prefix}-{sub}-{n}" if prefix not in EXEC_SUBTESTS else f"tage-{prefix}-{n}",
                 "test": "TAGE MAGE",
                 "source": label,
                 "section": name,
@@ -350,7 +385,9 @@ def main():
                 q["image"] = crop(doc, b, nxt, stop, f"img/tage/{prefix}-{sub}-{n}.png")
                 if sub != 4:
                     q["question"] = consigne or ""
-            key = keys.get(("exec", n)) if prefix == "exec" else keys.get((b["sub"], n))
+            key = keys.get(("exec", n)) if prefix in EXEC_SUBTESTS else keys.get((b["sub"], n))
+            if (prefix, n) in KEY_FIXES:
+                key, q["note"] = KEY_FIXES[(prefix, n)]
             if key:
                 q["answer"] = key
             if expl.get((b["sub"], n)):
@@ -363,13 +400,19 @@ def main():
         print(label, len([q for q in out if q["source"] == label]), subs,
               "no-answer", sum(1 for q in out if q["source"] == label and "answer" not in q),
               "expl", sum(1 for q in out if q["source"] == label and "explanation" in q))
-    write("tage", out)
+    return out
 
 
 def _paragraphs(lines):
+    # justified text with no space between paragraphs (Executive n°2): a sentence that ends on a short line ends
+    # the paragraph. Only when most lines reach the right margin, so ragged-right text is not split.
+    right = max(l["x1"] for l in lines)
+    justified = sum(l["x1"] > right - 3 for l in lines) > len(lines) / 2
+    short_end = lambda l: justified and l["x1"] < right - 30 and re.search(r"[.!?:»…]$", l["text"])
     paras, prev = [], None
     for ln in lines:
-        if prev is None or (ln["page"] == prev["page"] and ln["y0"] - prev["y1"] > 6) or ln["bold"] != prev["bold"]:
+        if prev is None or (ln["page"] == prev["page"] and ln["y0"] - prev["y1"] > 6) or ln["bold"] != prev["bold"] \
+                or short_end(prev):
             paras.append(ln["text"])
         else:
             paras[-1] += " " + ln["text"]

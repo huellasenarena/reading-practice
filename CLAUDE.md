@@ -10,7 +10,7 @@ The `gh` CLI's local config still labels the account `JNS99` (the old username);
 
 - Plain `index.html` + `style.css` + `app.js`, with no framework and no build step. Black and white, dark mode via `prefers-color-scheme`. No emojis or icons in the UI; controls are words.
 - Layout is the owner's choice from the mockups ("option C", split screen). The passage and images are on the left and the question and choices on the right. Questions with no passage or image use a single centered column.
-- The owner uses it mainly on an iPad, often as a home-screen app. The page itself never scrolls (`.app` is `100dvh`); the passage pane and the question pane each scroll on their own, with `overscroll-behavior: contain`. This replaced a sticky passage pane whose bottom was cut off behind Safari's toolbar. Below 720px everything stacks in one scrolling column.
+- The owner uses it mainly on an iPad, often as a home-screen app. The page itself never scrolls (`.app` is `position: fixed; inset: 0`; `100dvh` was sometimes wrong in the home-screen app and pushed the footer and the end of the passage off screen); the passage pane and the question pane each scroll on their own, with `overscroll-behavior: contain`. This replaced a sticky passage pane whose bottom was cut off behind Safari's toolbar. Below 720px everything stacks in one scrolling column.
 - Behaviour:
   - Questions appear in random order via **Next**, with no question numbers.
   - Filters: test, type (grouped by section), "verbal only", "include done", "wrong only", "starred only" (includes done questions).
@@ -23,6 +23,7 @@ The `gh` CLI's local config still labels the account `JNS99` (the old username);
   - Typed answers (CAT para jumble and odd sentence) use a text box. Comparison ignores case, spaces and punctuation.
   - Progress is saved in localStorage (`rp-progress-v1`, prefs in `rp-prefs-v1`), per device.
   - `#<question-id>` in the URL opens a specific question, and the hash is then cleared. The address bar is never set to the current question, so a home-screen icon or bookmark saves the plain site.
+- Home-screen app: `viewport-fit=cover`, so the page runs under the status bar; `.bar` adds `env(safe-area-inset-top)` (plus 8px in `display-mode: standalone`) to keep the filters clear of the status bar's blur. Hover styles are inside `@media (hover: hover)` because iPad taps leave `:hover` stuck on whatever lands under the finger after **Next**.
 - Home screen and offline: `manifest.webmanifest` + `icons/` (drawn by `tools/icons.py`). `sw.js` is a service worker that answers every request from the network first (4 s timeout) and falls back to its cache. On each load the page asks it to download any data files and images that are not cached yet (about 15 MB). The footer shows "available offline" when that is done. No version number needs bumping: updates arrive on the next online load. Home-screen apps on iPadOS keep their own storage, separate from Safari's.
 - The app loads `data/index.json`, then every `data/<name>.json` listed in it.
 - Test locally with `python3 -m http.server`.
